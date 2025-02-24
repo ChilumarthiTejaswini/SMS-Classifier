@@ -1,0 +1,70 @@
+!wget https://raw.githubusercontent.com/justmarkham/DAT8/master/data/sms.tsv -O spam.tsv
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense, SpatialDropout1D
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+df = pd.read_csv("spam.tsv", sep='\t', header=None, names=['label', 'Text'])
+df['label_enc'] = df['label'].map({'ham': 0, 'spam': 1})
+extra_spam = [
+    "Your PayPal account has been locked. Verify now to restore access.",
+    "Alert! Unusual login detected. Secure your account immediately!",
+    "Final notice: Your credit card is at risk! Confirm details now.",
+    "Your Netflix subscription is on hold due to payment failure. Update now!",
+    "We've noticed suspicious activity on your bank account. Click here to verify.",
+    "Apple ID locked! Click here to unlock immediately.",
+    "Your Amazon account has been compromised! Change your password now.",
+    "You have received a cashback reward! Click to claim instantly.",
+    "Lottery Winner! You've won $5000. Click to claim your prize.",
+    "Your phone number has been selected for a gift. Claim it now!"
+]
+extra_df = pd.DataFrame({"Text": extra_spam, "label_enc": [1] * len(extra_spam)})
+df = pd.concat([df, extra_df], ignore_index=True)
+tokenizer = Tokenizer(num_words=5000, oov_token="<OOV>")
+tokenizer.fit_on_texts(df['Text'])
+X = tokenizer.texts_to_sequences(df['Text'])
+X = pad_sequences(X, maxlen=50)  
+y = df['label_enc']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = Sequential([
+    Embedding(5000, 128, input_length=50),
+    SpatialDropout1D(0.2),
+    LSTM(100, dropout=0.2, recurrent_dropout=0.2),
+    Dense(1, activation='sigmoid')
+])
+model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.fit(X_train, y_train, epochs=5, batch_size=64, validation_data=(X_test, y_test))
+y_pred = (model.predict(X_test) > 0.5).astype("int32").flatten()
+accuracy = accuracy_score(y_test, y_pred)
+print(f"\n✅ LSTM Model Accuracy: {accuracy:.2f}")
+print("\n🔍 Classification Report:")
+print(classification_report(y_test, y_pred))
+def predict_spam_lstm(message):
+    message_seq = tokenizer.texts_to_sequences([message])
+    message_padded = pad_sequences(message_seq, maxlen=50)
+    prediction = (model.predict(message_padded) > 0.5).astype("int32")[0][0]
+    return "Spam" if prediction == 1 else "Ham"
+test_messages = [
+    "Congratulations! You have won a free iPhone! Click here to claim now!",
+    "Hey, are we still meeting for lunch tomorrow?",
+    "Urgent! Your account has been suspended. Verify now to reactivate.",
+    "Apple ID locked! Click here to unlock immediately.",
+    "Your Netflix subscription is on hold due to payment failure. Update now!"
+]
+print("\n📩 **Testing New Messages:**")
+for msg in test_messages:
+    print(f"Message: {msg}\nPrediction: {predict_spam_lstm(msg)}\n")
+import matplotlib.pyplot as plt
+import seaborn as sns
+label_counts = df['label_enc'].value_counts()
+plt.figure(figsize=(6,4))
+sns.barplot(x=label_counts.index, y=label_counts.values, palette=["blue", "red"])
+plt.xticks(ticks=[0,1], labels=['Ham', 'Spam'])
+plt.xlabel("Message Type")
+plt.ylabel("Count")
+plt.title("Spam vs Ham Message Distribution")
+plt.show()
